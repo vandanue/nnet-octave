@@ -1,0 +1,11 @@
+Name: nnet
+Version: 1.0.0
+Date: 2026-11-13
+Author: Michael Schmid
+Maintainer: Michael Schmid
+Title: Neural Networks
+Description: A feed forward multi-layer neural network, with a graphical Network/Data Manager (nntool), online learning (adapt) and a training record.
+Depends: octave (>= 6.4.0)
+Autoload: yes
+License: GPL version 2 or later
+Url: http://octnnettb.sourceforge.net
