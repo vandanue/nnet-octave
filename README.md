@@ -9,9 +9,10 @@ A neural-network toolbox for GNU Octave with a graphical **Network/Data Manager*
 - **`nntool`**: import or create data, build feed-forward networks, train, simulate, adapt, inspect and edit weights, and export results, all from windows (Qt toolkit).
 - **Quality-control plots**: performance, training state, regression and error histogram, with a plot interval, and a button that redraws any plot in a normal figure so you can save it as PNG.
 - **`[net, tr] = train(...)`**: `train` now returns a training record (performance, validation performance, gradient, `mu`, stop reason, time).
+- **Automatic scaling of mixed-scale data, inside the network**: `newff(..., "normalize")` makes the network scale every input and target variable by itself (from the training samples), so you train and simulate with the **raw data** and get results in the original units. Attributes such as acoustic impedance (thousands), instantaneous phase (±π), envelope and frequency need no hand-picked divisors like `AI/400`. In `nntool` the *Normalize* option is ticked by default. See [Variables on very different scales](#variables-on-very-different-scales).
 - **`adapt`, `learngd`, `learngdm`**: online (sample-by-sample) learning with gradient descent, with or without momentum.
-- **Examples**: four ready-to-run functions on a small rock-physics data set (P-wave velocity to density and S-wave velocity).
-- **Fixes to the original `nnet`**: a gradient bug for the `relu` transfer function, `min_max` for a single input row, and removal of warnings that newer Octave versions print. See [CHANGELOG below](#what-changed-compared-with-the-original-nnet).
+- **Examples**: five ready-to-run functions: a small rock-physics data set (P-wave velocity to density and S-wave velocity) and a demonstration of data scaling.
+- **Fixes to the original `nnet`**: a gradient bug for the `relu` transfer function, `min_max` for a single input row, and removal of warnings that newer Octave versions print. See [CHANGELOG below](#changelog).
 
 What the toolbox does: multilayer feed-forward networks (2 to 10 layers) trained with Levenberg-Marquardt (`trainlm`) and the mean squared error. Other network types, delay states and time-series training are not included (see [Limitations](#limitations)).
 
@@ -32,8 +33,8 @@ Other versions from 6.4.0 on are expected to work but have not been tested.
 
 Download the file for your system from the [latest release](../../releases/latest):
 
-- Windows: `nnet_gui-1.0.0.zip`
-- Linux: `nnet_gui-1.0.0.tar.gz`
+- Windows: `nnet_gui-1.0.1.zip`
+- Linux: `nnet_gui-1.0.1.tar.gz`
 
 (The "Source code" archives that GitHub generates for a release work as well.)
 
@@ -42,7 +43,7 @@ Download the file for your system from the [latest release](../../releases/lates
 ```
 cd C:/path/to/the/download/folder
 pkg uninstall nnet          % only if an older nnet is installed
-pkg install nnet_gui-1.0.0.zip
+pkg install nnet_gui-1.0.1.zip
 pkg load nnet
 ```
 
@@ -51,7 +52,7 @@ pkg load nnet
 ```
 cd ~/Downloads
 pkg uninstall nnet          % only if an older nnet is installed
-pkg install nnet_gui-1.0.0.tar.gz
+pkg install nnet_gui-1.0.1.tar.gz
 pkg load nnet
 ```
 
@@ -60,7 +61,7 @@ No administrator rights are needed. `pkg load nnet` must be repeated **in every 
 Directly from GitHub, without downloading anything first:
 
 ```
-pkg install "https://github.com/YOUR_USERNAME/octave-nnet-gui/archive/refs/tags/v1.0.0.tar.gz"
+pkg install "https://github.com/YOUR_USERNAME/octave-nnet-gui/archive/refs/tags/v1.0.1.tar.gz"
 ```
 
 Check the installation:
@@ -117,6 +118,32 @@ Y = poststd(sim(net, trastd(Pte, meanp, stdp)), meant, stdt);
 
 `nnet_demo_cli` is the complete version of this example, and `nnet_demo_adapt` shows online learning with `adapt`.
 
+### Variables on very different scales
+
+Inputs such as acoustic impedance (thousands), instantaneous phase (−π to π), amplitude envelope (0 to 5) and instantaneous frequency (tens of Hz) must be brought to a comparable range, or a network with `tansig` neurons trains badly (typically it stops after a few epochs with *Maximum MU reached* and learns nothing). Do not choose divisors by hand: let the network scale every variable (every row) by itself. Add `"normalize"` to `newff`:
+
+```
+% P: 4 x N matrix (one row per attribute), T: 1 x N target; raw, unscaled data
+net = newff(min_max(P), [10 1], {"tansig","purelin"}, "trainlm", "normalize");
+net.trainParam.goal = 1e-3;                       % goal is in scaled units
+net = train(net, Ptr, Ttr, [], [], struct("P", Pva, "T", Tva));
+Y = sim(net, Pte);                                % already in the original units
+```
+
+The scaling (mean 0 and standard deviation 1 per row; `"mapminmax"` gives min-max to [−1, 1] like MATLAB) is computed from the training samples the first time `train` is called, stored in the network, and applied by `train`, `sim` and `adapt`. Apply a trained network to another data set (another well) with `sim(net, Pnew)`: the same scaling is used. Without the option nothing changes, so existing scripts give the same results as before. In `nntool`, the *Normalize inputs and targets* option on the Train tab does the same and is **ticked by default**.
+
+The same can be done by hand with `prestd`, `trastd` and `poststd`. `nnet_demo_scaling` compares all options on synthetic attributes of exactly these sizes (test-set R², 1 = perfect):
+
+| Preparation of the data | R² |
+|---|---|
+| none (raw values) | −0.05 (the network fails) |
+| hand-picked divisors (`AI/400`, `envelope/5`) | 0.990 |
+| automatic by hand, mean 0 and std 1 (`prestd`) | 0.989 |
+| automatic by hand, min–max to [−1, 1] | 0.989 |
+| **inside the network, `newff(..., "normalize")`** | **0.989** |
+
+Notes: `tr.perf`, the goal and the validation performance are in scaled units. Instantaneous phase wraps around at ±π; if it matters, feed `cos(phase)` and `sin(phase)` instead of the raw phase.
+
 ## Screenshots
 
 | | |
@@ -145,11 +172,20 @@ Y = poststd(sim(net, trastd(Pte, meanp, stdp)), meant, stdt);
 - The manager keeps its items only while it is open: export to a MAT-file before closing.
 - With several outputs of very different size, the regression plot and histogram mix all outputs together.
 
-## What changed compared with the original nnet
+## Changelog
 
-Base: `nnet` 0.1.13 (Octave Forge) with the relu/leakyrelu patch.
+### 1.0.1
 
-- **New:** `nntool` (and `__nntool_*` helpers), `adapt`, `learngd`, `learngdm`, `nnet_demo_data`, `nnet_demo_cli`, `nnet_demo_adapt`, `nnet_demo_nntool`.
+- **`newff(..., "normalize")`** (also `"mapstd"`, `"mapminmax"`, `"none"`): the network scales its inputs and targets by itself; `train`, `sim` and `adapt` then work with the raw data and return results in the original units. Opt-in on the command line: scripts that do not use it behave exactly as before. The keyword may be given in place of the fifth or sixth argument, e.g. `newff(Pr, [8 1], {"tansig","purelin"}, "trainlm", "normalize")`.
+- **`nntool`:** *Normalize inputs and targets* is ticked by default and has a method choice (mean/std or min-max). It now uses the network's own scaling, so Simulate and Adapt work like the command line. Networks trained with 1.0.0 are upgraded automatically when imported or opened.
+- `nnet_demo_scaling` also shows the in-network option.
+
+### 1.0.0
+
+Changes compared with the original `nnet` 0.1.13 (Octave Forge, with the relu/leakyrelu patch):
+
+- **New:** `nntool` (and `__nntool_*` helpers), `adapt`, `learngd`, `learngdm`, `nnet_demo_data`, `nnet_demo_cli`, `nnet_demo_adapt`, `nnet_demo_nntool`, `nnet_demo_scaling`.
+- **Scaling in `nntool`:** the *Normalize inputs and targets* option (mean 0, std 1 per variable, from the training samples).
 - **`train` / `__trainlm`:** `[net, tr] = train(...)` returns the training record. `net = train(...)` works as before.
 - **`__drelu` (bug fix):** the derivative of `relu` was always 1 in the Jacobian used by `trainlm`, so `relu` behaved like a linear function while training. A finite-difference check now agrees to about 1e-10. Networks with `relu` trained with older versions should be trained again.
 - **`min_max`:** accepts a single row (one input variable).

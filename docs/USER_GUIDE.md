@@ -1,6 +1,6 @@
 # User guide: nnet with nntool for Octave
 
-Version 1.0.0. Tested on Octave 6.4.0, 7.1.0 and 8.4.0 (Linux); installation confirmed on Octave 11.3.0 (Windows).
+Version 1.0.1. Tested on Octave 6.4.0, 7.1.0 and 8.4.0 (Linux); installation confirmed on Octave 11.3.0 (Windows).
 
 ## Contents
 
@@ -21,9 +21,10 @@ Version 1.0.0. Tested on Octave 6.4.0, 7.1.0 and 8.4.0 (Linux); installation con
 This is the Octave `nnet` package (0.1.13 with the relu/leakyrelu patch) extended with:
 
 - **`nntool`**: a graphical *Network/Data Manager* modelled on the MATLAB tool of the same name. You import or create data, build feed-forward networks, train and simulate them, look at quality-control plots, and export the results.
+- **Automatic data scaling inside the network**: `newff(..., "normalize")` (section 3.4).
 - **`[net, tr] = train(...)`**: `train` also returns a training record `tr` (performance, gradient, mu and validation history per epoch).
 - **`adapt`, `learngd`, `learngdm`**: online (sample-by-sample) learning.
-- **Four example functions** (`nnet_demo_data`, `nnet_demo_cli`, `nnet_demo_adapt`, `nnet_demo_nntool`) that use a small rock-physics data set.
+- **Five example functions** (`nnet_demo_data`, `nnet_demo_cli`, `nnet_demo_adapt`, `nnet_demo_nntool`, `nnet_demo_scaling`) that use small synthetic rock-physics data sets.
 - **Fixes** to the original package (section 10), among them a gradient bug for the `relu` transfer function.
 
 The package trains multilayer feed-forward networks (2 to 10 layers) with Levenberg-Marquardt (`trainlm`) and the mean squared error (`mse`). What it cannot do is listed in section 8.
@@ -37,7 +38,7 @@ The package is pure Octave code (nothing to compile).
 ```
 cd C:/path/to/the/download/folder
 pkg uninstall nnet          % only if an older nnet is installed
-pkg install nnet_gui-1.0.0.zip
+pkg install nnet_gui-1.0.1.zip
 pkg load nnet
 ```
 
@@ -46,7 +47,7 @@ pkg load nnet
 ```
 cd ~/Downloads
 pkg uninstall nnet          % only if an older nnet is installed
-pkg install nnet_gui-1.0.0.tar.gz     % the .zip works as well
+pkg install nnet_gui-1.0.1.tar.gz     % the .zip works as well
 pkg load nnet
 ```
 
@@ -101,7 +102,37 @@ Only one kind of network exists: the static, fully connected **feed-forward netw
 
 ### 3.4 Why normalise
 
-Transfer functions such as `tansig` saturate for large inputs. If one variable is in the thousands (velocity in m/s) and another is about 2 (density in g/cm³), the network trains badly or not at all. Normalise inputs and targets to mean 0 and standard deviation 1 (`prestd`, or the *Normalize* checkbox in `nntool`) and convert the outputs back afterwards (`poststd`).
+Transfer functions such as `tansig` saturate for large inputs. If one variable is in the thousands (acoustic impedance, velocity in m/s) and another is about 2 (density in g/cm³) or between −π and π (instantaneous phase), the network trains badly or not at all.
+
+**Do not choose divisors by hand** (`AI/400`, `envelope/5`): the choice is arbitrary, and different people would pick different numbers (and a divisor that works for one data set fails on the next). Let the network scale every variable (every row) automatically from the training samples. There are three equivalent ways:
+
+1. **Inside the network (recommended).** Add `"normalize"` to `newff`. You then train and simulate with the **raw data** and `sim` returns results in the original units:
+
+   ```
+   net = newff(min_max(P), [10 1], {"tansig","purelin"}, "trainlm", "normalize");
+   net = train(net, Ptr, Ttr, [], [], struct("P", Pva, "T", Tva));
+   Y   = sim(net, Pnew);       % the scaling of the training data is applied automatically
+   ```
+
+   The keyword is `"normalize"` (same as `"mapstd"`: mean 0 and standard deviation 1 for every row) or `"mapminmax"` (every row mapped to [−1, 1], MATLAB's default). It may be given as the seventh argument of `newff` or in place of the fifth or sixth (`blf`, `pf`). The scaling is computed from the training samples the first time `train` (or `adapt`) is called, stored in `net.normalization`, and **kept** for later calls and for other data sets. To compute it again, set `net.normalization.settings = []`. Without the keyword nothing changes, so existing scripts give the same results as before.
+2. **In `nntool`**, the *Normalize inputs and targets* option of the Train tab does the same, with a choice of the method. It is **ticked by default** and recomputed from the training samples of each training run.
+3. **By hand**, with `prestd` (scale), `trastd` (apply the same scaling to other data) and `poststd` (convert the outputs back); example 4.4 shows it.
+
+`nnet_demo_scaling` compares the options on four synthetic attributes of very different size (acoustic impedance 4000 to 8000, instantaneous phase −π to π, envelope 0 to 5, instantaneous frequency 10 to 70 Hz). The test-set R² (1 = perfect) is:
+
+| Preparation of the data | R² |
+|---|---|
+| none (raw values) | −0.05 (the network fails) |
+| hand-picked divisors (`AI/400`, `envelope/5`) | 0.990 |
+| automatic by hand, mean 0 and std 1 (`prestd`) | 0.989 |
+| automatic by hand, min–max to [−1, 1] | 0.989 |
+| **inside the network, `newff(..., "normalize")`** | **0.989** |
+
+So the automatic scaling is as good as well-chosen manual divisors, without any subjective choice. A mild difference, such as dividing one variable by 5, usually changes little; the trouble starts when variables differ by factors of hundreds or thousands (typically `trainlm` then stops after a few epochs with *Maximum MU reached* and the network learns nothing).
+
+Notes. (1) With scaling, `tr.perf`, `tr.vperf` and the `goal` are in scaled units: a goal of 1e-4 then means an error of 1 % of the standard deviation, which for noisy data is usually far too strict; use around 1e-2 to 1e-3. (2) Instantaneous phase wraps around at ±π, so +3.1 and −3.1 are almost the same angle although they look far apart; scaling does not change that. If the phase matters, use `cos(phase)` and `sin(phase)` as inputs instead.
+
+Always evaluate the network on samples it was **not** trained on (the test set, or a well that was left out), not only on the training data: a network with many neurons can reproduce the training data closely and still predict poorly elsewhere.
 
 ## 4. Command-line workflow
 
@@ -109,7 +140,7 @@ Transfer functions such as `tansig` saturate for large inputs. If one variable i
 
 | Function | Purpose |
 |---|---|
-| `net = newff(Pr, ss, tf, "trainlm", blf, "mse")` | create the network |
+| `net = newff(Pr, ss, tf, "trainlm", blf, "mse", "normalize")` | create the network; the last argument (optional) makes it scale its data by itself |
 | `[net, tr] = train(net, P, T, [], [], VV)` | train (batch, Levenberg-Marquardt); `VV` is optional |
 | `Y = sim(net, P)` | simulate |
 | `[net, Y, E, tr] = adapt(net, P, T, passes)` | online learning |
@@ -126,6 +157,7 @@ Transfer functions such as `tansig` saturate for large inputs. If one variable i
 - `ss`: row vector of layer sizes, for example `[8 2]` means 8 hidden neurons and 2 output neurons. The last number must equal the number of rows of the targets.
 - `tf`: cell array of transfer functions, one per layer, for example `{"tansig","purelin"}`.
 - `blf`: the learning function used by `adapt`: `"learngdm"` (default) or `"learngd"`. `train` does not use it.
+- `nf` (seventh argument, optional): automatic scaling of inputs and targets: `"normalize"` (= `"mapstd"`), `"mapminmax"` or `"none"` (default). See section 3.4.
 
 ### 4.2 Training parameters
 
@@ -159,7 +191,7 @@ They are fields of `net.trainParam`:
 
 Possible stop messages: *Performance goal met.* / *Maximum epoch reached, performance goal was not met.* / *Maximum time elapsed, performance goal was not met.* / *Minimum gradient reached, performance goal was not met.* / *Maximum MU reached, performance goal was not met.* / *Validation stop.*
 
-When validation is used, `train` returns the network of the epoch with the best validation performance, not the last one.
+When validation is used, `train` returns the network of the epoch with the best validation performance, not the last one. If the network scales its data (`newff` option `"normalize"`), the performance values in `tr` and the training goal are in scaled units.
 
 ### 4.4 Example 1: train with validation (`nnet_demo_cli`)
 
@@ -333,7 +365,7 @@ The Train tab has two sub-tabs and a **Train Network** button. When you press th
 | Inputs, Targets | the data to train on, chosen from the manager |
 | Init Input/Layer Delay States | greyed out (not supported) |
 | Data Division (%) | *Training* (default 70), *Validation* (15) and *Test* (15). The samples are divided **at random, anew every time you train**. Training must be above 0. With Validation = 0 there is no early stopping. The test set is never used for training; it only appears in the plots. |
-| Normalize inputs and targets | when ticked, inputs and targets are scaled to mean 0 and standard deviation 1 using the **training samples only**. The statistics are stored in the network, so Simulate and Adapt use the same scaling and return results in the original units. |
+| Normalize inputs and targets | **ticked by default.** Inputs and targets are scaled by the network itself (section 3.4), using the **training samples only**, with the method of your choice: *mean 0, std 1 (mapstd)* or *min-max [-1, 1] (mapminmax)*. The scaling is stored in the network (`net.normalization`), so Simulate and Adapt use the same scaling and return results in the original units. It is recomputed at every training run. Untick it to train on the data as they are. |
 | Outputs, Errors | names under which the results are stored in the manager (default: network name plus `_outputs` and `_errors`). An existing item of the same name is overwritten. |
 
 **Training Parameters**
@@ -472,7 +504,7 @@ Your network should give values within about 0.01 g/cm³ and 10 m/s of these. On
 | several inputs and outputs per network | one input block and one output block (each may have several rows) |
 | input and layer delay states | not supported; those lists are shown greyed out |
 | adapt with cell-array (time-series) data and many learning functions | `adapt` with `learngd` and `learngdm`, sample by sample; the columns are the samples |
-| data division and normalisation are network properties | chosen in the Train tab for each training run; normalisation is stored with the network |
+| data division and normalisation are network properties | the division is chosen in the Train tab for each training run; the normalisation is stored in the network (`net.normalization`, `newff` option) |
 | live training window with a Stop button | the Training Results window appears after training; training cannot be stopped from the window (use Ctrl+C in the command window) |
 | nnstart apps (fitting, pattern recognition, clustering, time series) | not included |
 | tabs | built from toggle buttons, because Octave has no tab control |
@@ -502,22 +534,23 @@ Other limits: the transfer functions are `tansig`, `logsig`, `purelin`, `relu`, 
 
 ## 10. Changes made to the original nnet package
 
-Base: nnet 0.1.13 (Octave Forge) with the relu and leakyrelu patch. This release is version 1.0.0.
+Base: nnet 0.1.13 (Octave Forge) with the relu and leakyrelu patch. This release is version 1.0.1; the README lists the changes of every version.
 
-**New files:** `nntool` and its helpers (`__nntool_*.m`), `adapt`, `learngd`, `learngdm`, `nnet_demo_data`, `nnet_demo_cli`, `nnet_demo_adapt`, `nnet_demo_nntool`.
+**New files:** `nntool` and its helpers (`__nntool_*.m`), `adapt`, `learngd`, `learngdm`, `nnet_demo_data`, `nnet_demo_cli`, `nnet_demo_adapt`, `nnet_demo_nntool`, `nnet_demo_scaling`; since 1.0.1 also `__nnormalize` (automatic scaling, internal) and `__nntool_upgrade` (upgrades networks trained with nntool 1.0.0).
 
 **Changed files:**
 
 | File | Change |
 |---|---|
-| `train.m`, `__trainlm.m` | `[net, tr] = train(...)` returns the training record (epoch, perf, vperf, numFail, mu, gradient, stop, time). Calling `net = train(...)` works as before. |
+| `train.m`, `__trainlm.m` | `[net, tr] = train(...)` returns the training record (epoch, perf, vperf, numFail, mu, gradient, stop, time). Calling `net = train(...)` works as before. Since 1.0.1 `train` applies the network's automatic scaling (`newff` option) to the training and validation data. |
+| `sim.m` | since 1.0.1: applies the network's automatic scaling to the inputs and converts the outputs back to the original units |
 | `__drelu.m` | **Bug fix.** The derivative of relu was always 1 in the Jacobian used by trainlm, so relu behaved as a linear function during training. The new version returns 1 where the argument is positive and 0 elsewhere. A finite-difference check now agrees to about 1e-10. Networks with relu trained with older versions should be trained again. |
 | `min_max.m` | accepts a single row (one input variable). Scalars, column vectors and non-numeric input are still rejected; complex input reports "illegal type". |
-| `newff.m` | the fifth argument blf ("learngd" or "learngdm"; default "learngdm") is stored for adapt; other values are ignored. The stray output of `notUsed = noSense` was removed. New fields `net.adaptFcn` and `net.adaptParam`. |
+| `newff.m` | the fifth argument blf ("learngd" or "learngdm"; default "learngdm") is stored for adapt; other values are ignored. The stray output of `notUsed = noSense` was removed. New fields `net.adaptFcn` and `net.adaptParam`. Since 1.0.1 an optional seventh argument (or a keyword in place of the fifth or sixth) makes the network scale its data by itself: "normalize" / "mapstd", "mapminmax" or "none"; new field `net.normalization`. |
 | `__printAdaptParam.m` | prints the new adaptParam structure (used by saveMLPStruct) |
 | `__newnetwork.m`, `__printTrainParam.m`, `__trainlm.m`, `isposint.m`, `newff.m`, `newp.m`, `train.m` | the single-character logical operators in 17 if conditions were replaced by the short-circuit forms (all operands are scalars). This removes the "Matlab-style short-circuit" warnings. |
 | `__optimizedatasets.m`, `__rerangecolumns.m`, `newff.m`, `subset.m` | in the built-in tests, deprecated backslash line continuations replaced by three dots (29 lines) |
-| `DESCRIPTION`, `INDEX` | version 1.0.0, Octave 6.4.0 or later, new entries |
+| `DESCRIPTION`, `INDEX` | version 1.0.1, Octave 6.4.0 or later, new entries |
 
 All unit tests of the package pass (`test <function>`), including new tests for adapt, learngd, learngdm, min_max, `__drelu` and the demos.
 
@@ -530,10 +563,11 @@ All unit tests of the package pass (`test <function>`), including new tests for 
 | `[net, Y, E, tr] = adapt(net, P, T, passes)` | online learning, sample by sample; tr.pass, tr.perf, tr.time |
 | `[dW, ls] = learngd(gW, lp, ls)` | gradient descent step: dW = lr*gW |
 | `[dW, ls] = learngdm(gW, lp, ls)` | with momentum: dW = mc*dWprev + (1-mc)*lr*gW |
-| `net = newff(Pr, ss, tf, "trainlm", blf, "mse")` | network; blf = "learngdm" or "learngd" |
+| `net = newff(Pr, ss, tf, "trainlm", blf, "mse", nf)` | network; blf = "learngdm" or "learngd"; nf (optional) = "normalize", "mapminmax" or "none" (automatic scaling inside the network) |
 | `Pr = min_max(P)` | ranges; works for a single input row |
 | `nnet_demo_data(N, seed)` | synthetic Vp, rho, Vs data; without output arguments it creates Vp, rho, Vs, P and T in the workspace |
 | `nnet_demo_cli`, `nnet_demo_adapt` | the two command-line examples of sections 4.4 and 4.5 |
 | `nnet_demo_nntool` | create the example data and open nntool (section 6) |
+| `nnet_demo_scaling` | compare raw, hand-scaled and automatically scaled inputs (section 3.4) |
 
 Use `help <function>` in Octave for the built-in help text of any of them.
