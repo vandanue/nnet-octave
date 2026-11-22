@@ -61,7 +61,7 @@ No administrator rights are needed. `pkg load nnet` must be repeated **in every 
 Directly from GitHub, without downloading anything first:
 
 ```
-pkg install "https://github.com/YOUR_USERNAME/octave-nnet-gui/archive/refs/tags/v1.0.1.tar.gz"
+pkg install "https://github.com/vandanue/octave-nnet-gui/archive/refs/tags/v1.0.1.tar.gz"
 ```
 
 Check the installation:
